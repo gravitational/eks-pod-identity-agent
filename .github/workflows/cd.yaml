@@ -6,6 +6,15 @@ on:
     tags:
       - v*
   workflow_dispatch:
+    inputs:
+      deploy_env:
+        description: "Select staging or production release"
+        default: staging
+        required: false
+        type: choice
+        options:
+          - staging # build and push artifacts to staging repos
+          - release # build and push artifacts to release repos
 
 permissions:
   contents: read
@@ -32,7 +41,7 @@ jobs:
     name: Build and push Docker container and Helm Charts
     runs-on: ubuntu-latest
     needs: [test]
-    environment: release
+    environment: ${{ inputs.deploy_env || 'release' }}
     env:
       AWS_REGION_PRIVATE: us-west-2
       AWS_REGION_PUBLIC: us-east-1
