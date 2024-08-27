@@ -80,3 +80,12 @@ updateStrategy:
   type: RollingUpdate
   rollingUpdate:
     maxUnavailable: "10%"
+
+# This setting can be used to create service account and enable IRSA
+# instead of relying on EC2 instance credentials.
+# for enhanced security recommended to use together with AWS_EC2_METADATA_DISABLED=true
+irsa:
+  enabled: false
+  service_account:
+    role_arn: IRSA_ROLE_ARN
+    additionalAnnotations:
