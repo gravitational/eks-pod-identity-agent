@@ -25,21 +25,49 @@ const (
 	sessionTagRoleAnnotationPrefix = assumeRoleAnnotationPrefix + "session-tag/"
 )
 
-type CredentialRetriever struct {
-	delegate  credentials.CredentialRetriever
-	jwtParser *jwt.Parser
-	// STS client based on IRSA Role assigned to eks-pod-identity
-	// using IRSA role allows to Chain-Assume role avoiding PackedPolicyTooLargeException
-	// https://github.com/aws/containers-roadmap/issues/2413
-	stsIrsa *sts.Client
-}
+var (
+	_ AWSSessionConfigurer = (*PodIdentityAssociationSessionConfigurer)(nil)
+)
+
+type (
+	RoleAssumer interface {
+		AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error)
+	}
+	AWSSessionConfigurer interface {
+		GetSessionConfiguration(ctx context.Context, awsCfg aws.Config, clusterName string, associationID string) (*sts.AssumeRoleInput, error)
+	}
+
+	CredentialRetriever struct {
+		delegate             credentials.CredentialRetriever
+		jwtParser            *jwt.Parser
+		roleAssumer          RoleAssumer
+		awsSessionConfigurer AWSSessionConfigurer
+	}
+
+	PodIdentityAssociationSessionConfigurer struct{}
+)
 
 func NewCredentialsRetriever(awsCfg aws.Config, eksCredentialsRetriever credentials.CredentialRetriever) *CredentialRetriever {
 	return &CredentialRetriever{
-		delegate:  eksCredentialsRetriever,
-		jwtParser: jwt.NewParser(),
-		stsIrsa:   sts.NewFromConfig(awsCfg),
+		delegate:             eksCredentialsRetriever,
+		jwtParser:            jwt.NewParser(),
+		roleAssumer:          sts.NewFromConfig(awsCfg),
+		awsSessionConfigurer: &PodIdentityAssociationSessionConfigurer{},
 	}
+}
+
+func (r *PodIdentityAssociationSessionConfigurer) GetSessionConfiguration(ctx context.Context, awsCfg aws.Config, clusterName, associationID string) (*sts.AssumeRoleInput, error) {
+	// Describe pod identity association to get tags
+	podIdentityAssociation, err := eks.NewFromConfig(awsCfg).DescribePodIdentityAssociation(ctx,
+		&eks.DescribePodIdentityAssociationInput{
+			AssociationId: aws.String(associationID),
+			ClusterName:   aws.String(clusterName),
+		})
+	if err != nil {
+		return nil, fmt.Errorf("error describing pod identity association %s/%s: %w", clusterName, associationID, err)
+	}
+
+	return tagsToSTSAssumeRole(podIdentityAssociation.Association.Tags), nil
 }
 
 func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *credentials.EksCredentialsRequest) (
@@ -81,24 +109,17 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 		return nil, nil, fmt.Errorf("error loading pod identity credentials: %w", err)
 	}
 
-	// Describe pod identity association to get tags
-	podIdentityAssociation, err := eks.NewFromConfig(podIdentityCfg).DescribePodIdentityAssociation(ctx,
-		&eks.DescribePodIdentityAssociationInput{
-			AssociationId: aws.String(responseMetadata.AssociationId()),
-			ClusterName:   aws.String(request.ClusterName),
-		})
-	if err != nil {
-		return nil, nil, fmt.Errorf("error describing pod identity association %s/%s: %w", request.ClusterName, responseMetadata.AssociationId(), err)
-	}
-
 	// Assume new session based on the configurations provided in tags
 	// session is assumed based on the IRSA credentials and NOT EKS Identity credentials
 	// this is because EKS Identity credentials adds bunch of default tags
 	// leaving no space for our custom tags https://github.com/aws/containers-roadmap/issues/2413
-	newSessionParams := tagsToSTSAssumeRole(podIdentityAssociation.Association.Tags)
-	assumeRoleOutput, err := c.stsIrsa.AssumeRole(ctx, newSessionParams)
+	assumeRoleInput, err := c.awsSessionConfigurer.GetSessionConfiguration(ctx, podIdentityCfg, request.ClusterName, responseMetadata.AssociationId())
 	if err != nil {
-		return nil, nil, fmt.Errorf("error assuming role %s: %w", *newSessionParams.RoleArn, err)
+		return nil, nil, fmt.Errorf("error getting session configuration: %w", err)
+	}
+	assumeRoleOutput, err := c.roleAssumer.AssumeRole(ctx, assumeRoleInput)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error assuming role %s: %w", *assumeRoleInput.RoleArn, err)
 	}
 
 	log.WithField("role_arn", assumeRoleOutput.AssumedRoleUser.Arn).
@@ -111,7 +132,7 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 		return nil, nil, fmt.Errorf("error formatting IAM credentials: %w", err)
 	}
 
-	return assumedCredentials, nil, nil
+	return assumedCredentials, responseMetadata, nil
 }
 
 func tagsToSTSAssumeRole(tags map[string]string) *sts.AssumeRoleInput {
