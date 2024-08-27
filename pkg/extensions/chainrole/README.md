@@ -5,15 +5,15 @@ before sharing credentials with requesting container.
 
 ## Why
 
-This functionality will enable following feature:
-- Cross Account Role assume
+This functionality will enable following features:
+- Cross Account Assume Role 
 - Customization of Role Session Name, Role Session Tags, etc. - https://github.com/aws/eks-pod-identity-agent/issues/14
 - Work around `packedPolicySize` issue - https://github.com/aws/containers-roadmap/issues/2413
 
 ## How
 
 In addition to normal [AssumeRoleForPodIdentity](https://docs.aws.amazon.com/eks/latest/APIReference/API_auth_AssumeRoleForPodIdentity.html) logic,
-extensions adds following:
+extensions adds following logic:
 1. Get Namespace and Serviceaccount name from JWT token
 1. Check them against `--chainrole-namespace-pattern` and `--chainrole-service-account-pattern` provided regexps
     - In case of no match, stop custom logic and proceed with normal flow
