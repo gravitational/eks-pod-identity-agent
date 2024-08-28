@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -38,22 +39,40 @@ type (
 	}
 
 	CredentialRetriever struct {
-		delegate             credentials.CredentialRetriever
-		jwtParser            *jwt.Parser
-		roleAssumer          RoleAssumer
-		awsSessionConfigurer AWSSessionConfigurer
+		delegate               credentials.CredentialRetriever
+		jwtParser              *jwt.Parser
+		roleAssumer            RoleAssumer
+		awsSessionConfigurer   AWSSessionConfigurer
+		reNamespaceFilter      *regexp.Regexp
+		reServiceAccountFilter *regexp.Regexp
 	}
 
 	PodIdentityAssociationSessionConfigurer struct{}
 )
 
 func NewCredentialsRetriever(awsCfg aws.Config, eksCredentialsRetriever credentials.CredentialRetriever) *CredentialRetriever {
-	return &CredentialRetriever{
+	cr := &CredentialRetriever{
 		delegate:             eksCredentialsRetriever,
 		jwtParser:            jwt.NewParser(),
 		roleAssumer:          sts.NewFromConfig(awsCfg),
 		awsSessionConfigurer: &PodIdentityAssociationSessionConfigurer{},
 	}
+
+	log := logger.FromContext(context.TODO()).WithField("extension", "chainrole")
+
+	if namespacePattern != "" {
+		cr.reNamespaceFilter = regexp.MustCompile(namespacePattern)
+		log = log.WithField("namespace_filter_regexp", cr.reNamespaceFilter.String())
+	}
+
+	if serviceAccountPattern != "" {
+		cr.reServiceAccountFilter = regexp.MustCompile(serviceAccountPattern)
+		log = log.WithField("serviceaccount_filter_regexp", cr.reServiceAccountFilter.String())
+	}
+
+	log.Info("Enabled extension...")
+
+	return cr
 }
 
 func (r *PodIdentityAssociationSessionConfigurer) GetSessionConfiguration(ctx context.Context, awsCfg aws.Config, clusterName, associationID string) (*sts.AssumeRoleInput, error) {
@@ -95,8 +114,7 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 
 	// Check if Namespace/ServiceAccount filters configured
 	// and do not proceed with role chaining if they don't match
-	if (reNamespaceFilter != nil && !reNamespaceFilter.MatchString(ns)) ||
-		(reServiceAccountFilter != nil && !reServiceAccountFilter.MatchString(sa)) {
+	if !c.isEnabledFor(ns, sa) {
 		log.Debug("namespace/serviceaccount do not match ChainRole filter. Skipping role chaining")
 		return iamCredentials, responseMetadata, nil
 	}
@@ -133,6 +151,14 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 	}
 
 	return assumedCredentials, responseMetadata, nil
+}
+
+func (c *CredentialRetriever) isEnabledFor(namespace, serviceAccount string) bool {
+	namespaceMatch := c.reNamespaceFilter == nil || c.reNamespaceFilter.MatchString(namespace)
+	serviceAccountMatch := c.reServiceAccountFilter == nil || c.reServiceAccountFilter.MatchString(serviceAccount)
+
+	return namespaceMatch && serviceAccountMatch
+
 }
 
 func tagsToSTSAssumeRole(tags map[string]string) *sts.AssumeRoleInput {

@@ -368,21 +368,16 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 			ctrl := gomock.NewController(t)
-			reNamespaceFilter = regexp.MustCompile(tt.namespaceFilter)
-			reServiceAccountFilter = regexp.MustCompile(tt.serviceaccountFilter)
-
-			t.Cleanup(func() {
-				ctrl.Finish()
-				reNamespaceFilter = nil
-				reServiceAccountFilter = nil
-			})
+			t.Cleanup(ctrl.Finish)
 
 			delegate := mockcreds.NewMockCredentialRetriever(ctrl)
 			c := &CredentialRetriever{
-				delegate:             delegate,
-				jwtParser:            jwt.NewParser(),
-				roleAssumer:          &mockRoleAssumer{},
-				awsSessionConfigurer: &mockSessionConfigurer{},
+				delegate:               delegate,
+				jwtParser:              jwt.NewParser(),
+				roleAssumer:            &mockRoleAssumer{},
+				awsSessionConfigurer:   &mockSessionConfigurer{},
+				reNamespaceFilter:      regexp.MustCompile(tt.namespaceFilter),
+				reServiceAccountFilter: regexp.MustCompile(tt.serviceaccountFilter),
 			}
 
 			delegate.EXPECT().GetIamCredentials(gomock.Any(), gomock.Any()).
