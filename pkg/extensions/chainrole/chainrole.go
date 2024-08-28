@@ -98,7 +98,7 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 	if (reNamespaceFilter != nil && !reNamespaceFilter.MatchString(ns)) ||
 		(reServiceAccountFilter != nil && !reServiceAccountFilter.MatchString(sa)) {
 		log.Debug("namespace/serviceaccount do not match ChainRole filter. Skipping role chaining")
-		return iamCredentials, responseMetadata, err
+		return iamCredentials, responseMetadata, nil
 	}
 
 	// Assume eks pod identity credentials
