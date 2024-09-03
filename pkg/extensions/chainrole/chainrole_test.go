@@ -148,9 +148,6 @@ func TestCredentialRetriever_serviceAccountFromJWT(t *testing.T) {
 		jwtParser: jwt.NewParser(),
 	}
 
-	type args struct {
-		token string
-	}
 	tests := []struct {
 		name       string
 		token      string
@@ -211,8 +208,7 @@ func createTestToken(subject string) string {
 }
 
 type (
-	mockRoleAssumer       struct{}
-	mockSessionConfigurer struct{}
+	mockRoleAssumer struct{}
 )
 
 func (m *mockRoleAssumer) AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error) {
@@ -229,7 +225,7 @@ func (m *mockRoleAssumer) AssumeRole(ctx context.Context, params *sts.AssumeRole
 	}, nil
 }
 
-func (m *mockSessionConfigurer) GetSessionConfiguration(ctx context.Context, awsCfg aws.Config, clusterName string, associationID string) (*sts.AssumeRoleInput, error) {
+func mockSessionConfiguration(ctx context.Context, awsCfg aws.Config, clusterName string, associationID string) (*sts.AssumeRoleInput, error) {
 	return &sts.AssumeRoleInput{}, nil
 }
 
@@ -375,7 +371,7 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 				delegate:               delegate,
 				jwtParser:              jwt.NewParser(),
 				roleAssumer:            &mockRoleAssumer{},
-				awsSessionConfigurer:   &mockSessionConfigurer{},
+				getSessionConfig:       mockSessionConfiguration,
 				reNamespaceFilter:      regexp.MustCompile(tt.namespaceFilter),
 				reServiceAccountFilter: regexp.MustCompile(tt.serviceaccountFilter),
 			}
