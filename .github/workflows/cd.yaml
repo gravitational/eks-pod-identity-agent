@@ -144,8 +144,7 @@ jobs:
           ARTIFACT_NAME=$(find . -name '*.tgz' -exec basename {} \; | head -n 1)
 
           # Publish the chart
-          # helm push "$ARTIFACT_NAME" "oci://${{ vars.HELM_PRIVATE_ECR_REPO }}"
-          helm push "$ARTIFACT_NAME" "oci://603330915152.dkr.ecr.us-west-2.amazonaws.com/gravitational/charts/"
+          helm push "$ARTIFACT_NAME" "oci://${{ vars.HELM_PRIVATE_ECR_REPO }}"
           if [[ "$EVENT_TYPE" == "tag" ]]; then
             helm push "$ARTIFACT_NAME" "oci://${{ vars.HELM_PUBLIC_ECR_REPO }} "
           fi
