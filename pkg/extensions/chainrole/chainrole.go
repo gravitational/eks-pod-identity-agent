@@ -99,10 +99,10 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 	}
 
 	log = log.WithFields(logrus.Fields{
-		"namespace":                   ns,
-		"serviceaccount":              sa,
-		"cluster_name":                request.ClusterName,
-		"pod_identity_association_id": responseMetadata.AssociationId(),
+		"namespace":      ns,
+		"serviceaccount": sa,
+		"cluster-name":   request.ClusterName,
+		"association-id": responseMetadata.AssociationId(),
 	})
 
 	// Check if Namespace/ServiceAccount filters configured
@@ -133,7 +133,8 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 		return nil, nil, fmt.Errorf("error assuming role %s: %w", *assumeRoleInput.RoleArn, err)
 	}
 
-	log.WithField("role_arn", assumeRoleOutput.AssumedRoleUser.Arn).
+	log.WithField("assumed_role_arn", assumeRoleOutput.AssumedRoleUser.Arn).
+		WithField("assumed_role_id", assumeRoleOutput.AssumedRoleUser.AssumedRoleId).
 		WithField("source_identity", assumeRoleOutput.SourceIdentity).
 		WithField("packed_policy_size", assumeRoleOutput.PackedPolicySize).
 		Info("successfully assumed role")
