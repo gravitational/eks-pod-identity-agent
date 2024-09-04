@@ -79,7 +79,13 @@ func getSessionConfigurationFromEKSPodIdentityTags(ctx context.Context, awsCfg a
 		return nil, fmt.Errorf("error describing pod identity association %s/%s: %w", clusterName, associationID, err)
 	}
 
-	return tagsToSTSAssumeRole(podIdentityAssociation.Association.Tags), nil
+	assumeRoleInput := tagsToSTSAssumeRole(podIdentityAssociation.Association.Tags)
+
+	if assumeRoleInput.RoleArn == nil {
+		return nil, fmt.Errorf("couldn't get assume role arn from pod identity association tags %v", podIdentityAssociation.Association.Tags)
+	}
+
+	return assumeRoleInput, nil
 }
 
 func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *credentials.EksCredentialsRequest) (
