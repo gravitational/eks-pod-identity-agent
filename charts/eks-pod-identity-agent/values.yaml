@@ -36,10 +36,8 @@ env:
 fullnameOverride: "eks-pod-identity-agent"
 
 image:
-  containerRegistry: "602401143452.dkr.ecr.us-west-2.amazonaws.com"
+  containerRegistry: "public.ecr.aws/gravitational/eks-pod-identity-agent"
   pullPolicy: Always
-  region: us-west-2
-  tag: 0.1.10
 
   # Set to use custom image
   # override: "repo/org/image:tag"
