@@ -63,7 +63,11 @@ func NewCredentialsRetriever(awsCfg aws.Config, eksCredentialsRetriever credenti
 		log = log.WithField("serviceaccount_filter_regexp", cr.reServiceAccountFilter.String())
 	}
 
-	log.Info("Enabled extension...")
+	if namespacePattern == "" && serviceAccountPattern == "" {
+		log.Info("Namespace/ServiceAccount filters are not provided. Extension is not enabled...")
+	} else {
+		log.Info("Enabled extension...")
+	}
 
 	return cr
 }
