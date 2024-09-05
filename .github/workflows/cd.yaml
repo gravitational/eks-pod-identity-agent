@@ -42,7 +42,7 @@ jobs:
   build-and-push:
     strategy:
       matrix:
-        environment:  ${{ inputs.deploy_env || fromJson('["staging", "release"]') }} 
+        environment: ${{ fromJson(format('[{0}]', inputs.deploy_env || '"staging", "release"' )) }}
     name: Build and push Docker image and Helm chart
     runs-on: ubuntu-latest
     needs: [test]
