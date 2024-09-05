@@ -42,17 +42,12 @@ jobs:
   build-and-push:
     strategy:
       matrix:
-        environment: 
-        - ${{ inputs.deploy_env }}
-        - if: matrix.environment != inputs.deploy_env
-            - release
-        - if: matrix.environment != inputs.deploy_env
-            - staging
-        
+        environment: [ staging, release ] 
     name: Build and push Docker image and Helm chart
     runs-on: ubuntu-latest
     needs: [test]
     environment: ${{ matrix.environment }}
+    if: ${{ inputs.deploy_env != '' && matrix.environment == inputs.deploy_env }}
     env:
       AWS_REGION_PRIVATE: us-west-2
       AWS_REGION_PUBLIC: us-east-1
