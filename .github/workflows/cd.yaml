@@ -14,7 +14,7 @@ on:
         default: staging
         required: false
         type: choice
-        options: &environments
+        options:
           - staging # build and push artifacts to staging repos
           - release # build and push artifacts to release repos (works only for main branch)
 
@@ -42,7 +42,7 @@ jobs:
   build-and-push:
     strategy:
       matrix:
-        environment: *environments
+        environment: [staging, release]
     name: Build and push Docker image and Helm chart
     runs-on: ubuntu-latest
     needs: [test]
