@@ -2,8 +2,8 @@ package chainrole
 
 import (
 	"context"
-	"reflect"
 	"regexp"
+	"sort"
 	"testing"
 	"time"
 
@@ -61,9 +61,12 @@ func Test_tagsToSTSAssumeRole(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tagsToSTSAssumeRole(tt.tags); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("tagsToSTSAssumeRole() = %v, want %v", got, tt.want)
-			}
+			g := NewWithT(t)
+			got := tagsToSTSAssumeRole(tt.tags)
+			sort.Slice(got.Tags, func(i, j int) bool {
+				return *got.Tags[i].Key < *got.Tags[j].Key
+			})
+			g.Expect(got).To(Equal(tt.want))
 		})
 	}
 }
@@ -131,14 +134,14 @@ func Test_formatIAMCredentials(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
 			got, err := formatIAMCredentials(tt.assumeRole)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("formatIAMCredentials() error = %v, wantErr %v", err, tt.wantErr)
-				return
+			if tt.wantErr {
+				g.Expect(err).Error()
+			} else {
+				g.Expect(err).To(BeNil())
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("formatIAMCredentials() = %v, want %v", got, tt.want)
-			}
+			g.Expect(got).To(Equal(tt.want))
 		})
 	}
 }
@@ -179,17 +182,15 @@ func TestCredentialRetriever_serviceAccountFromJWT(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
 			namespace, serviceaccount, err := c.serviceAccountFromJWT(tt.token)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("CredentialRetriever.serviceAccountFromJWT() error = %v", err)
-				return
+			if tt.wantErr {
+				g.Expect(err).Error()
+			} else {
+				g.Expect(err).To(BeNil())
 			}
-			if namespace != tt.expectedNs {
-				t.Errorf("CredentialRetriever.serviceAccountFromJWT() got = %v, want %v", namespace, tt.expectedNs)
-			}
-			if serviceaccount != tt.expectedSa {
-				t.Errorf("CredentialRetriever.serviceAccountFromJWT() got1 = %v, want %v", serviceaccount, tt.expectedSa)
-			}
+			g.Expect(namespace).To(Equal(tt.expectedNs))
+			g.Expect(serviceaccount).To(Equal(tt.expectedSa))
 		})
 	}
 }
