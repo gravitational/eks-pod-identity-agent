@@ -264,15 +264,15 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 		serviceaccountFilter string
 	}{
 		{
-			name: "Credentials request with no filter",
+			name: "Credentials request with no filter (chain logic skipped)",
 			req: &credentials.EksCredentialsRequest{
 				ClusterName:         "test-cluster-1",
 				ServiceAccountToken: createTestToken("system:serviceaccount:test-namespace:test-service-account"),
 			},
-			want: testDataAssumeRoleChainedCreds,
+			want: testDataAssumeRoleForPodIdentityCreds,
 		},
 		{
-			name:            "Credentials request with namespace filter, no match",
+			name:            "Credentials request with namespace filter, no match (chain logic skipped)",
 			namespaceFilter: `filter-that-will-not-match`,
 			req: &credentials.EksCredentialsRequest{
 				ClusterName:         "test-cluster-1",
@@ -281,7 +281,7 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 			want: testDataAssumeRoleForPodIdentityCreds,
 		},
 		{
-			name:                 "Credentials request with sa filter, no match",
+			name:                 "Credentials request with sa filter, no match (chain logic skipped)",
 			serviceaccountFilter: `filter-that-will-not-match`,
 			req: &credentials.EksCredentialsRequest{
 				ClusterName:         "test-cluster-1",
@@ -290,7 +290,7 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 			want: testDataAssumeRoleForPodIdentityCreds,
 		},
 		{
-			name:                 "Credentials request with ns and sa filter, no match",
+			name:                 "Credentials request with ns and sa filter, no match (chain logic skipped)",
 			serviceaccountFilter: `filter-that-will-not-match`,
 			namespaceFilter:      `filter-that-will-not-match`,
 			req: &credentials.EksCredentialsRequest{
@@ -300,7 +300,7 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 			want: testDataAssumeRoleForPodIdentityCreds,
 		},
 		{
-			name:            "Credentials request with namespace filter",
+			name:            "Credentials request with namespace filter (chaining role)",
 			namespaceFilter: `test.*`,
 			req: &credentials.EksCredentialsRequest{
 				ClusterName:         "test-cluster-1",
@@ -309,7 +309,7 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 			want: testDataAssumeRoleChainedCreds,
 		},
 		{
-			name:                 "Credentials request with sa filter",
+			name:                 "Credentials request with sa filter (chaining role)",
 			serviceaccountFilter: `test.*`,
 			req: &credentials.EksCredentialsRequest{
 				ClusterName:         "test-cluster-1",
@@ -318,7 +318,7 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 			want: testDataAssumeRoleChainedCreds,
 		},
 		{
-			name:                 "Credentials request with ns and sa filter",
+			name:                 "Credentials request with ns and sa filter (chaining role)",
 			serviceaccountFilter: `test.*`,
 			namespaceFilter:      `test.*`,
 			req: &credentials.EksCredentialsRequest{
@@ -366,14 +366,21 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			t.Cleanup(ctrl.Finish)
 
+			re := func(pattern string) *regexp.Regexp {
+				if pattern == "" {
+					return nil
+				}
+				return regexp.MustCompile(pattern)
+			}
+
 			delegate := mockcreds.NewMockCredentialRetriever(ctrl)
 			c := &CredentialRetriever{
 				delegate:               delegate,
 				jwtParser:              jwt.NewParser(),
 				roleAssumer:            &mockRoleAssumer{},
 				getSessionConfig:       mockSessionConfiguration,
-				reNamespaceFilter:      regexp.MustCompile(tt.namespaceFilter),
-				reServiceAccountFilter: regexp.MustCompile(tt.serviceaccountFilter),
+				reNamespaceFilter:      re(tt.namespaceFilter),
+				reServiceAccountFilter: re(tt.serviceaccountFilter),
 			}
 
 			delegate.EXPECT().GetIamCredentials(gomock.Any(), gomock.Any()).

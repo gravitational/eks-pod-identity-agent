@@ -154,6 +154,12 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 }
 
 func (c *CredentialRetriever) isEnabledFor(namespace, serviceAccount string) bool {
+	// at least one filter is required to enable chainrole logic,
+	// otherwise it's disabled
+	if c.reNamespaceFilter == nil && c.reServiceAccountFilter == nil {
+		return false
+	}
+
 	namespaceMatch := c.reNamespaceFilter == nil || c.reNamespaceFilter.MatchString(namespace)
 	serviceAccountMatch := c.reServiceAccountFilter == nil || c.reServiceAccountFilter.MatchString(serviceAccount)
 
