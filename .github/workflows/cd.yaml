@@ -42,7 +42,13 @@ jobs:
   build-and-push:
     strategy:
       matrix:
-        environment: [staging, release]
+        environment: 
+        - ${{ inputs.deploy_env }}
+        - if: matrix.environment != inputs.deploy_env
+            - release
+        - if: matrix.environment != inputs.deploy_env
+            - staging
+        
     name: Build and push Docker image and Helm chart
     runs-on: ubuntu-latest
     needs: [test]
