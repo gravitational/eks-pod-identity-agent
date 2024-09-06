@@ -55,7 +55,8 @@ jobs:
             chart: ${{ vars.HELM_PUBLIC_ECR_REPO }}
             push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
         exclude:
-          - push: false
+          - ecr_repo:
+              push: false
 
     name: Build and push Docker image and Helm chart
     runs-on: ubuntu-latest
