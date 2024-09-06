@@ -147,4 +147,9 @@ jobs:
           ARTIFACT_NAME=$(find . -name '*.tgz' -exec basename {} \; | head -n 1)
 
           # Publish the chart
-          helm push "$ARTIFACT_NAME" "oci://${{ matrix.ecr_repo.chart }}"
+          helm_repo=${{vars.HELM_PRIVATE_ECR_REPO}}
+          if [ "${{ matrix.ecr_repo.type}}" = "public" ]; then
+            helm_repo=${{vars.HELM_PUBLIC_ECR_REPO}}
+          fi
+          
+          helm push "$ARTIFACT_NAME" "oci://$helm_repo"
