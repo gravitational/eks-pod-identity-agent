@@ -94,7 +94,7 @@ jobs:
         uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
         with:
           images: |
-            name=${{ matrix.ecr_repo.name }},enable=true
+            name=${{ matrix.ecr_repo.container }},enable=true
           flavor: |
             latest=false
           # Enable sha tag on branch push events and workflow dispatches.
