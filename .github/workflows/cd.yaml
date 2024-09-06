@@ -62,9 +62,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test]
     environment: ${{ matrix.environment }}
-    env:
-      AWS_REGION_PRIVATE: us-west-2
-      AWS_REGION_PUBLIC: us-east-1
     permissions:
       contents: read
       id-token: write # This is required for requesting the JWT, see https://github.com/aws-actions/configure-aws-credentials#OIDC
@@ -83,7 +80,7 @@ jobs:
           aws-region: ${{ matrix.ecr_repo.region }}
           role-to-assume: ${{ vars.ECR_ROLE }}
 
-      - name: Login to Amazon ECR Public
+      - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2
         with:
@@ -94,7 +91,7 @@ jobs:
         uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
         with:
           images: |
-            name=${{ matrix.ecr_repo.container }},enable=true
+            name=${{ steps.login-ecr.outputs.registry }}/${{ github.repository }},enable=true
           flavor: |
             latest=false
           # Enable sha tag on branch push events and workflow dispatches.
