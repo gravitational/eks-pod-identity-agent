@@ -43,6 +43,7 @@ jobs:
     strategy:
       matrix:
         ecr_repo:
+          # environment protection rules allow to push to "release" env only from master branch of tags
           - region: us-west-2
             environment: release
             type: private
