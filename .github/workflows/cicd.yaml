@@ -102,10 +102,11 @@ jobs:
           # Enable sha tag on branch push events and workflow dispatches.
           # Enable semver tags on tag push events, but don't overwrite major/minor tags for prereleases.
           tags: |
-            type=sha,prefix={{branch}}-,suffix=-{{date 'YYYYMMDDTHHmmss'}},format=short,enable=${{ startsWith(github.ref, 'refs/heads/') }}
-            type=semver,pattern={{major}},enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
-            type=semver,pattern={{version}},enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-,suffix=-{{date 'YYYYMMDDTHHmmss'}},format=short,event=branch
+            type=semver,pattern={{major}},event=tag,enable=${{ !contains(github.ref, '-') }}
+            type=semver,pattern={{major}}.{{minor}},event=tag,enable=${{ !contains(github.ref, '-') }}
+            type=semver,pattern={{version}},event=tag
   
       - name: Build the Docker image and push
         uses: docker/build-push-action@5cd11c3a4ced054e52742c5fd54dca954e0edd85 # v6
