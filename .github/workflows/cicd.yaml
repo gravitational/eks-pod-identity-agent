@@ -97,7 +97,8 @@ jobs:
         uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
         with:
           images: |
-            name=${{ steps.login-ecr.outputs.registry }}/${{ github.repository }},enable=true
+            name=${{ vars.PUBLIC_ECR_REPO }},enable=${{ matrix.ecr_repo.type == 'public' }}
+            name=${{ vars.PRIVATE_ECR_REPO }},enable=${{ matrix.ecr_repo.type == 'private' }}
           flavor: |
             latest=false
           # Enable PR
