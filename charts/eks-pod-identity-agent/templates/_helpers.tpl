@@ -57,6 +57,8 @@ The eks-pod-identity-agent image to use
 {{- define "eks-pod-identity-agent.image" -}}
 {{- if .Values.image.override }}
 {{- .Values.image.override }}
+{{- else if (contains "gravitational/eks-pod-identity-agent" .Values.image.containerRegistry ) }}
+{{- printf "%s:%s" .Values.image.containerRegistry (default .Chart.AppVersion .Values.image.tag) }}
 {{- else }}
 {{- printf "%s/eks/eks-pod-identity-agent:%s" .Values.image.containerRegistry .Values.image.tag }}
 {{- end }}
