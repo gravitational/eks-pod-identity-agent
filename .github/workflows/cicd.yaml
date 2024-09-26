@@ -107,8 +107,6 @@ jobs:
           tags: |
             type=ref,suffix=-{{ sha }},event=pr
             type=sha,prefix={{branch}}-,suffix=-{{date 'YYYYMMDDTHHmmss'}},format=short,enable=${{ startsWith(github.ref, 'refs/heads/') }}
-            type=semver,pattern={{major}},event=tag,enable=${{ !contains(github.ref, '-') }}
-            type=semver,pattern={{major}}.{{minor}},event=tag,enable=${{ !contains(github.ref, '-') }}
             type=semver,pattern={{version}},event=tag
   
       - name: Build the Docker image and push
