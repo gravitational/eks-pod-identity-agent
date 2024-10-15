@@ -10,20 +10,21 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
-	"github.com/aws/aws-sdk-go-v2/config"
-	awsCreds "github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
 	"go.amzn.com/eks/eks-pod-identity-agent/internal/middleware/logger"
 	"go.amzn.com/eks/eks-pod-identity-agent/pkg/credentials"
+	"go.amzn.com/eks/eks-pod-identity-agent/pkg/extensions/chainrole/ekspodidentities"
+	"go.amzn.com/eks/eks-pod-identity-agent/pkg/extensions/chainrole/serviceaccount"
 )
 
 const (
 	assumeRoleAnnotationPrefix     = "assume-role.ekspia.go.amzn.com/"
 	sessionTagRoleAnnotationPrefix = assumeRoleAnnotationPrefix + "session-tag/"
+	// service account annotations doesn't support more than one "/"
+	sessionTagRoleAnnotationPrefix2 = assumeRoleAnnotationPrefix + "session-tag-"
 )
 
 type (
@@ -31,13 +32,15 @@ type (
 		AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error)
 	}
 
-	sessionConfigFunc func(ctx context.Context, awsCfg aws.Config, clusterName string, associationID string) (*sts.AssumeRoleInput, error)
+	sessionConfigRetriever interface {
+		GetSessionConfigMap(ctx context.Context, request *credentials.EksCredentialsRequest) (map[string]string, error)
+	}
 
 	CredentialRetriever struct {
 		delegate               credentials.CredentialRetriever
 		jwtParser              *jwt.Parser
 		roleAssumer            roleAssumer
-		getSessionConfig       sessionConfigFunc
+		sessionConfigRetriever sessionConfigRetriever
 		reNamespaceFilter      *regexp.Regexp
 		reServiceAccountFilter *regexp.Regexp
 	}
@@ -45,10 +48,9 @@ type (
 
 func NewCredentialsRetriever(awsCfg aws.Config, eksCredentialsRetriever credentials.CredentialRetriever) *CredentialRetriever {
 	cr := &CredentialRetriever{
-		delegate:         eksCredentialsRetriever,
-		jwtParser:        jwt.NewParser(),
-		roleAssumer:      sts.NewFromConfig(awsCfg),
-		getSessionConfig: getSessionConfigurationFromEKSPodIdentityTags,
+		delegate:    eksCredentialsRetriever,
+		jwtParser:   jwt.NewParser(),
+		roleAssumer: sts.NewFromConfig(awsCfg),
 	}
 
 	log := logger.FromContext(context.TODO()).WithField("extension", "chainrole")
@@ -69,38 +71,20 @@ func NewCredentialsRetriever(awsCfg aws.Config, eksCredentialsRetriever credenti
 		log.Info("Enabled extension...")
 	}
 
+	switch sessionConfigSourceVal {
+	case eksPodIdentityAssociationTags:
+		cr.sessionConfigRetriever = ekspodidentities.NewSessionConfigRetriever(eksCredentialsRetriever)
+	case serviceAccountAnnotations:
+		cr.sessionConfigRetriever = serviceaccount.NewSessionConfigRetriever()
+	default:
+	}
+
 	return cr
-}
-
-func getSessionConfigurationFromEKSPodIdentityTags(ctx context.Context, awsCfg aws.Config, clusterName, associationID string) (*sts.AssumeRoleInput, error) {
-	// Describe pod identity association to get tags
-	podIdentityAssociation, err := eks.NewFromConfig(awsCfg).DescribePodIdentityAssociation(ctx,
-		&eks.DescribePodIdentityAssociationInput{
-			AssociationId: aws.String(associationID),
-			ClusterName:   aws.String(clusterName),
-		})
-	if err != nil {
-		return nil, fmt.Errorf("error describing pod identity association %s/%s: %w", clusterName, associationID, err)
-	}
-
-	assumeRoleInput := tagsToSTSAssumeRole(podIdentityAssociation.Association.Tags)
-
-	if assumeRoleInput.RoleArn == nil {
-		return nil, fmt.Errorf("couldn't get assume role arn from pod identity association tags %v", podIdentityAssociation.Association.Tags)
-	}
-
-	return assumeRoleInput, nil
 }
 
 func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *credentials.EksCredentialsRequest) (
 	*credentials.EksCredentialsResponse, credentials.ResponseMetadata, error) {
 	log := logger.FromContext(ctx).WithField("extension", "chainrole")
-
-	// Get AWS EKS Pod Identity credentials as usual
-	iamCredentials, responseMetadata, err := c.delegate.GetIamCredentials(ctx, request)
-	if err != nil {
-		return nil, nil, err
-	}
 
 	// Get Namespace and ServiceAccount names from JWT token
 	ns, sa, err := c.serviceAccountFromJWT(request.ServiceAccountToken)
@@ -108,36 +92,25 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 		return nil, nil, fmt.Errorf("error parsing JWT token: %w", err)
 	}
 
-	log = log.WithFields(logrus.Fields{
-		"namespace":      ns,
-		"serviceaccount": sa,
-		"cluster-name":   request.ClusterName,
-		"association-id": responseMetadata.AssociationId(),
-	})
-
 	// Check if Namespace/ServiceAccount filters configured
 	// and do not proceed with role chaining if they don't match
 	if !c.isEnabledFor(ns, sa) {
 		log.Debug("namespace/serviceaccount do not match ChainRole filter. Skipping role chaining")
-		return iamCredentials, responseMetadata, nil
+		return c.delegate.GetIamCredentials(ctx, request)
 	}
 
-	// Assume eks pod identity credentials
-	podIdentityCfg, err := config.LoadDefaultConfig(context.TODO(), config.WithCredentialsProvider(
-		awsCreds.NewStaticCredentialsProvider(iamCredentials.AccessKeyId, iamCredentials.SecretAccessKey, iamCredentials.Token),
-	))
+	log = log.WithFields(logrus.Fields{
+		"namespace":      ns,
+		"serviceaccount": sa,
+		"cluster-name":   request.ClusterName,
+	})
+
+	sessionConfigMap, err := c.sessionConfigRetriever.GetSessionConfigMap(ctx, request)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error loading pod identity credentials: %w", err)
+		return nil, nil, err
 	}
 
-	// Assume new session based on the configurations provided in tags
-	// session is assumed based on the IRSA credentials and NOT EKS Identity credentials
-	// this is because EKS Identity credentials adds bunch of default tags
-	// leaving no space for our custom tags https://github.com/aws/containers-roadmap/issues/2413
-	assumeRoleInput, err := c.getSessionConfig(ctx, podIdentityCfg, request.ClusterName, responseMetadata.AssociationId())
-	if err != nil {
-		return nil, nil, fmt.Errorf("error getting session configuration: %w", err)
-	}
+	assumeRoleInput := tagsToSTSAssumeRole(sessionConfigMap)
 	assumeRoleOutput, err := c.roleAssumer.AssumeRole(ctx, assumeRoleInput)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error assuming role %s: %w", *assumeRoleInput.RoleArn, err)
@@ -154,7 +127,7 @@ func (c *CredentialRetriever) GetIamCredentials(ctx context.Context, request *cr
 		return nil, nil, fmt.Errorf("error formatting IAM credentials: %w", err)
 	}
 
-	return assumedCredentials, responseMetadata, nil
+	return assumedCredentials, nil, nil
 }
 
 func (c *CredentialRetriever) isEnabledFor(namespace, serviceAccount string) bool {
@@ -196,8 +169,9 @@ func tagsToSTSAssumeRole(tags map[string]string) *sts.AssumeRoleInput {
 			assumeRoleParams.DurationSeconds = aws.Int32(int32(duration.Seconds()))
 		}
 
-		if strings.HasPrefix(key, sessionTagRoleAnnotationPrefix) {
+		if strings.HasPrefix(key, sessionTagRoleAnnotationPrefix) || strings.HasPrefix(key, sessionTagRoleAnnotationPrefix2) {
 			tagKey := strings.TrimPrefix(key, sessionTagRoleAnnotationPrefix)
+			tagKey = strings.TrimPrefix(tagKey, sessionTagRoleAnnotationPrefix2)
 
 			assumeRoleParams.Tags = append(assumeRoleParams.Tags, types.Tag{
 				Key:   aws.String(tagKey),
@@ -228,26 +202,15 @@ func formatIAMCredentials(o *sts.AssumeRoleOutput) (*credentials.EksCredentialsR
 	}, nil
 }
 
-func (c *CredentialRetriever) serviceAccountFromJWT(token string) (string, string, error) {
-	parsedToken, _, err := c.jwtParser.ParseUnverified(token, &jwt.RegisteredClaims{})
+func (c *CredentialRetriever) serviceAccountFromJWT(token string) (ns string, sa string, err error) {
+	claims, subject, err := serviceaccount.ServiceAccountFromJWT(token)
 	if err != nil {
 		return "", "", fmt.Errorf("error parsing JWT token: %w", err)
 	}
 
-	subject, err := parsedToken.Claims.GetSubject()
-	if err != nil {
-		return "", "", fmt.Errorf("error reading JWT token subject: %w", err)
+	if claims != nil && claims.Namespace != "" && claims.ServiceAccount.Name != "" {
+		return claims.Namespace, claims.ServiceAccount.Name, nil
 	}
 
-	// subject is in the format: system:serviceaccount:<namespace>:<service_account>
-	if !strings.HasPrefix(subject, "system:serviceaccount:") {
-		return "", "", errors.New("JWT token claim subject doesn't start with 'system:serviceaccount:'")
-	}
-
-	subjectParts := strings.Split(subject, ":")
-	if len(subjectParts) < 4 {
-		return "", "", errors.New("invalid JWT token claim subject")
-	}
-
-	return subjectParts[2], subjectParts[3], nil
+	return serviceaccount.ServiceAccountFromJWTSubject(subject)
 }
