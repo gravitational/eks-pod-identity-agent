@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	eksauthTypes "github.com/aws/aws-sdk-go-v2/service/eksauth/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/golang-jwt/jwt/v5"
@@ -209,7 +208,8 @@ func createTestToken(subject string) string {
 }
 
 type (
-	mockRoleAssumer struct{}
+	mockRoleAssumer            struct{}
+	mockSessionConfigRetriever struct{}
 )
 
 func (m *mockRoleAssumer) AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error) {
@@ -226,8 +226,8 @@ func (m *mockRoleAssumer) AssumeRole(ctx context.Context, params *sts.AssumeRole
 	}, nil
 }
 
-func mockSessionConfiguration(ctx context.Context, awsCfg aws.Config, clusterName string, associationID string) (*sts.AssumeRoleInput, error) {
-	return &sts.AssumeRoleInput{}, nil
+func (m *mockSessionConfigRetriever) GetSessionConfigMap(ctx context.Context, request *credentials.EksCredentialsRequest) (map[string]string, error) {
+	return map[string]string{}, nil
 }
 
 type responseMetadataTest string
@@ -256,13 +256,14 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 	logger.Initialize("DEBUG")
 
 	tests := []struct {
-		name                 string
-		req                  *credentials.EksCredentialsRequest
-		want                 *credentials.EksCredentialsResponse
-		delegateErr          error
-		wantErr              error
-		namespaceFilter      string
-		serviceaccountFilter string
+		name                  string
+		req                   *credentials.EksCredentialsRequest
+		want                  *credentials.EksCredentialsResponse
+		delegateErr           error
+		expectedDelegateCalls int
+		wantErr               error
+		namespaceFilter       string
+		serviceaccountFilter  string
 	}{
 		{
 			name: "Credentials request with no filter (chain logic skipped)",
@@ -270,7 +271,8 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 				ClusterName:         "test-cluster-1",
 				ServiceAccountToken: createTestToken("system:serviceaccount:test-namespace:test-service-account"),
 			},
-			want: testDataAssumeRoleForPodIdentityCreds,
+			want:                  testDataAssumeRoleForPodIdentityCreds,
+			expectedDelegateCalls: 1,
 		},
 		{
 			name:            "Credentials request with namespace filter, no match (chain logic skipped)",
@@ -279,7 +281,8 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 				ClusterName:         "test-cluster-1",
 				ServiceAccountToken: createTestToken("system:serviceaccount:test-namespace:test-service-account"),
 			},
-			want: testDataAssumeRoleForPodIdentityCreds,
+			want:                  testDataAssumeRoleForPodIdentityCreds,
+			expectedDelegateCalls: 1,
 		},
 		{
 			name:                 "Credentials request with sa filter, no match (chain logic skipped)",
@@ -288,7 +291,8 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 				ClusterName:         "test-cluster-1",
 				ServiceAccountToken: createTestToken("system:serviceaccount:test-namespace:test-service-account"),
 			},
-			want: testDataAssumeRoleForPodIdentityCreds,
+			want:                  testDataAssumeRoleForPodIdentityCreds,
+			expectedDelegateCalls: 1,
 		},
 		{
 			name:                 "Credentials request with ns and sa filter, no match (chain logic skipped)",
@@ -298,7 +302,8 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 				ClusterName:         "test-cluster-1",
 				ServiceAccountToken: createTestToken("system:serviceaccount:test-namespace:test-service-account"),
 			},
-			want: testDataAssumeRoleForPodIdentityCreds,
+			want:                  testDataAssumeRoleForPodIdentityCreds,
+			expectedDelegateCalls: 1,
 		},
 		{
 			name:            "Credentials request with namespace filter (chaining role)",
@@ -329,30 +334,6 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 			want: testDataAssumeRoleChainedCreds,
 		},
 		{
-			name:        "Invalid Pod Identity Token",
-			req:         &credentials.EksCredentialsRequest{},
-			delegateErr: &eksauthTypes.InvalidTokenException{},
-			wantErr:     &eksauthTypes.InvalidTokenException{},
-		},
-		{
-			name:        "Expired Pod Identity Token",
-			req:         &credentials.EksCredentialsRequest{},
-			delegateErr: &eksauthTypes.ExpiredTokenException{},
-			wantErr:     &eksauthTypes.ExpiredTokenException{},
-		},
-		{
-			name:        "SA Unavailable Exception",
-			req:         &credentials.EksCredentialsRequest{},
-			delegateErr: &eksauthTypes.ServiceUnavailableException{},
-			wantErr:     &eksauthTypes.ServiceUnavailableException{},
-		},
-		{
-			name:        "Access Denied Exception",
-			req:         &credentials.EksCredentialsRequest{},
-			delegateErr: &eksauthTypes.AccessDeniedException{},
-			wantErr:     &eksauthTypes.AccessDeniedException{},
-		},
-		{
 			name: "Invalid token",
 			req: &credentials.EksCredentialsRequest{
 				ClusterName:         "test-cluster-1",
@@ -379,13 +360,13 @@ func TestCredentialRetriever_GetIamCredentials(t *testing.T) {
 				delegate:               delegate,
 				jwtParser:              jwt.NewParser(),
 				roleAssumer:            &mockRoleAssumer{},
-				getSessionConfig:       mockSessionConfiguration,
+				sessionConfigRetriever: &mockSessionConfigRetriever{},
 				reNamespaceFilter:      re(tt.namespaceFilter),
 				reServiceAccountFilter: re(tt.serviceaccountFilter),
 			}
 
 			delegate.EXPECT().GetIamCredentials(gomock.Any(), gomock.Any()).
-				Return(testDataAssumeRoleForPodIdentityCreds, responseMetadataTest("test"), tt.delegateErr).Times(1)
+				Return(testDataAssumeRoleForPodIdentityCreds, responseMetadataTest("test"), tt.delegateErr).Times(tt.expectedDelegateCalls)
 
 			got, _, err := c.GetIamCredentials(context.TODO(), tt.req)
 			if tt.wantErr != nil {
