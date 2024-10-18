@@ -15,8 +15,7 @@ var (
 func AddCMDFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&namespacePattern, "chainrole-namespace-pattern", "", "", "Namespace pattern to apply chain role functionality")
 	cmd.Flags().StringVarP(&serviceAccountPattern, "chainrole-service-account-pattern", "", "", "Service account pattern to apply chain role functionality")
-	cmd.Flags().StringVarP(&serviceAccountPattern, "chainrole-session-config-source", "", "", "Service account pattern to apply chain role functionality")
-	cmd.Flags().Var(&sessionConfigSourceVal, "session-config-source", fmt.Sprintf(`Source from where to get session configurations, must be %q or %q`, eksPodIdentityAssociationTags, serviceAccountAnnotations))
+	cmd.Flags().Var(&sessionConfigSourceVal, "chainrole-session-config-source", fmt.Sprintf(`Source from where to get session configurations, must be %q or %q`, eksPodIdentityAssociationTags, serviceAccountAnnotations))
 }
 
 type sessionConfigSource string
