@@ -7,8 +7,6 @@ metadata:
   labels:
     {{- include "eks-pod-identity-agent.labels" . | nindent 4 }}
 spec:
-  updateStrategy:
-    {{- toYaml .Values.updateStrategy | nindent 4 }}
   selector:
     matchLabels:
       {{- include "eks-pod-identity-agent.selectorLabels" . | nindent 6 }}
