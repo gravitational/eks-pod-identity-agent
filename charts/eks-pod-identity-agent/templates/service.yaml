@@ -21,6 +21,5 @@ spec:
       targetPort: {{ .Values.metrics.port }}
 {{- end}}
   selector:
-    matchLabels:
-      {{- include "eks-pod-identity-agent.selectorLabels" . | nindent 6 }}
+    {{- include "eks-pod-identity-agent.selectorLabels" . | nindent 4 }}
 {{-  end }}
