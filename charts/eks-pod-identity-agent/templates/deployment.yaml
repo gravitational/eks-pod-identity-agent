@@ -83,7 +83,6 @@ spec:
           livenessProbe:
             failureThreshold: 3
             httpGet:
-              host: localhost
               path: {{ .Values.agent.livenessEndpoint }}
               port: probes-port
               scheme: HTTP
@@ -94,7 +93,6 @@ spec:
           readinessProbe:
             failureThreshold: 30
             httpGet:
-              host: localhost
               path: {{ .Values.agent.readinessEndpoint }}
               port: probes-port
               scheme: HTTP
