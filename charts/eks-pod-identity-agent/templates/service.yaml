@@ -1,0 +1,25 @@
+{{- if .Values.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "eks-pod-identity-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+  {{- include "eks-pod-identity-agent.labels" . | nindent 4 }}
+  {{- with .Values.metrics.extraLabels -}}
+  {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      name: http
+{{- if .Values.metrics.enabled }}
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: {{ .Values.metrics.port }}
+{{- end}}
+  selector:
+    {{- include "eks-pod-identity-agent.selectorLabels" . | nindent 4 }}
+{{-  end }}

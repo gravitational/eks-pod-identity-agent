@@ -102,3 +102,20 @@ irsa:
   service_account:
     role_arn: IRSA_ROLE_ARN
     additionalAnnotations:
+  cluster_role:
+    enabled: false
+    permissions:
+      serviceaccounts:
+        verbs: ["get", "list", "watch"]
+      tokenreviews:
+        verbs: ["create"]
+    additionalRules: []
+
+deployment:
+  enabled: false
+  port: 80
+
+service:
+  enabled: false
+  type: ClusterIP
+  port: 80

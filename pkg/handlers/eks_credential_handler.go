@@ -15,9 +15,9 @@ import (
 	"go.amzn.com/eks/eks-pod-identity-agent/internal/middleware/logger"
 	"go.amzn.com/eks/eks-pod-identity-agent/internal/validation"
 	"go.amzn.com/eks/eks-pod-identity-agent/pkg/credentials"
-	"go.amzn.com/eks/eks-pod-identity-agent/pkg/extensions/chainrole"
-
 	"go.amzn.com/eks/eks-pod-identity-agent/pkg/errors"
+
+	"go.amzn.com/eks/eks-pod-identity-agent/pkg/extensions/chainrole"
 )
 
 type EksCredentialHandler struct {
