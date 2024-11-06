@@ -5,14 +5,21 @@ metadata:
   name: {{ include "eks-pod-identity-agent.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "eks-pod-identity-agent.labels" . | nindent 4 }}
+  {{- include "eks-pod-identity-agent.labels" . | nindent 4 }}
+  {{- with .Values.metrics.extraLabels -}}
+  {{ toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:
     - port: {{ .Values.service.port }}
-      protocol: TCP
       targetPort: http
       name: http
+{{- if .Values.metrics.enabled }}
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: {{ .Values.metrics.port }}
+{{- end}}
   selector:
     matchLabels:
       {{- include "eks-pod-identity-agent.selectorLabels" . | nindent 6 }}
