@@ -1,0 +1,162 @@
+name: CICD
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: [v*]
+  workflow_dispatch:
+    inputs:
+      push_to_repo:
+        # This allows to manually trigger deployment of any branch to private repo
+        description: "Select repo type"
+        default: private
+        required: false
+        type: choice
+        options:
+          - private
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test application and helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        with:
+          fetch-depth: 0
+      - name: Setup Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run tets
+        run: make test
+      - name: Build helm chart
+        working-directory: charts/eks-pod-identity-agent
+        run: helm package . --version "1.2.3-dev" --app-version "4.5.6-dev"
+
+  build-and-push:
+    strategy:
+      matrix:
+        ecr_repo:
+          # environment protection rules allow to push to "release" env only from master branch of tags
+          - region: us-west-2
+            environment: release
+            type: private
+            push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+          - region: us-east-1
+            environment: release
+            type: public
+            push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+          - region: us-west-2
+            environment: staging
+            type: private
+            push: true
+          - region: us-east-1
+            environment: staging
+            type: public
+            push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+        exclude:
+          - ecr_repo:
+              push: false
+
+    name: Build and push Docker image and Helm chart
+    runs-on: ubuntu-latest
+    needs: [test]
+    environment: ${{ matrix.ecr_repo.environment }}
+    permissions:
+      contents: read
+      id-token: write # This is required for requesting the JWT, see https://github.com/aws-actions/configure-aws-credentials#OIDC
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup docker buildx
+        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3
+        
+      - name: Configure AWS credentials for ECR Private
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4
+        with:
+          aws-region: ${{ matrix.ecr_repo.region }}
+          role-to-assume: ${{ vars.ECR_ROLE }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2
+        with:
+          registry-type: ${{ matrix.ecr_repo.type }}
+
+      - name: Prepare docker labels and tags
+        id: meta
+        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
+        with:
+          images: |
+            name=${{ vars.PUBLIC_ECR_REPO }},enable=${{ matrix.ecr_repo.type == 'public' }}
+            name=${{ vars.PRIVATE_ECR_REPO }},enable=${{ matrix.ecr_repo.type == 'private' }}
+          flavor: |
+            latest=false
+          # Enable PR
+          # Enable sha tag on branch push events and workflow dispatches.
+          # Enable semver tags on tag push events, but don't overwrite major/minor tags for prereleases.
+          tags: |
+            type=ref,suffix=-{{ sha }},event=pr
+            type=sha,prefix={{branch}}-,suffix=-{{date 'YYYYMMDDTHHmmss'}},format=short,enable=${{ startsWith(github.ref, 'refs/heads/') }}
+            type=semver,pattern={{version}},event=tag
+  
+      - name: Build the Docker image and push
+        uses: docker/build-push-action@5cd11c3a4ced054e52742c5fd54dca954e0edd85 # v6
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: |
+            linux/amd64
+            linux/arm64
+
+      - name: Build and publish the Helm chart
+        working-directory: charts/eks-pod-identity-agent
+        env:
+          EVENT_TYPE: ${{ (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') && 'tag' ) || 'commit' ) || 'dispatch'}}
+          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          # Determine chart version to set
+          case "${EVENT_TYPE}" in
+            tag)
+              CHART_VERSION="${GITHUB_REF_NAME}"
+              ;;
+            commit)
+              ;&
+            dispatch)
+              CHART_VERSION="$(git describe --tags --dirty --long --match "v[[:digit:]]*.[[:digit:]]*.[[:digit:]]*" || true)"
+              ;;
+            *)
+              echo "Unknown event type '${EVENT_TYPE}', workflow bug?" >&2
+              exit 1
+              ;;
+          esac
+
+          # Trim `v` prefix if exists
+          CHART_VERSION=${CHART_VERSION#v}
+          IMAGE_VERSION=${IMAGE_VERSION#v}
+          CHART_VERSION=${CHART_VERSION:-0.0.0-${IMAGE_VERSION}}
+
+          # Build/package the chart
+          echo "Setting chart version to ${CHART_VERSION} and image version to ${IMAGE_VERSION}"
+          helm package . --version "${CHART_VERSION}" --app-version "${IMAGE_VERSION}"
+          ARTIFACT_NAME=$(find . -name '*.tgz' -exec basename {} \; | head -n 1)
+
+          # Publish the chart
+          helm_repo=${{vars.HELM_PRIVATE_ECR_REPO}}
+          if [ "${{ matrix.ecr_repo.type}}" = "public" ]; then
+            helm_repo=${{vars.HELM_PUBLIC_ECR_REPO}}
+          fi
+
+          helm push "$ARTIFACT_NAME" "oci://$helm_repo"

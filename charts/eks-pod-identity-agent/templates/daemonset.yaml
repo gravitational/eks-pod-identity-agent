@@ -32,6 +32,9 @@ spec:
     spec:
       priorityClassName: {{ $top.Values.priorityClassName }}
       hostNetwork: true
+      {{- if .Values.irsa.enabled }}
+      serviceAccountName: {{ include "eks-pod-identity-agent.fullname" . }}
+      {{- end }}
       terminationGracePeriodSeconds: 30
       {{- with $top.Values.tolerations }}
       tolerations:
