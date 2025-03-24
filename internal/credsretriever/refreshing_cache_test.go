@@ -408,3 +408,133 @@ func TestCachedCredentialRetriever_GetIamCredentials_Refresh(t *testing.T) {
 		})
 	}
 }
+
+type EksCredentialsResponseWithError struct {
+	credentialsResponse *credentials.EksCredentialsResponse
+	err                 error
+}
+
+func TestCachedCredentialRetriever_GetIamCredentials_ActiveRequestCaching(t *testing.T) {
+	var (
+		numRequests      = 16
+		sampleRequestOne = credentials.EksCredentialsRequest{
+			ServiceAccountToken: "some.jwt.token.one",
+		}
+		sampleResponseOne = credentials.EksCredentialsResponse{
+			AccountId:  "accountOne",
+			Expiration: credentials.SdkCompliantExpirationTime{Time: time.Now().Add(time.Hour)},
+		}
+	)
+
+	tests := []struct {
+		name                        string
+		requests                    []credentials.EksCredentialsRequest
+		expectedCredentialsResponse []credentials.EksCredentialsResponse
+		expectedErrMsg              string
+		expectedDelegateCalls       func(retriever *mockcreds.MockCredentialRetriever)
+	}{
+		{
+			name: "calls without error",
+			requests: []credentials.EksCredentialsRequest{
+				sampleRequestOne,
+			},
+			expectedDelegateCalls: func(delegate *mockcreds.MockCredentialRetriever) {
+				delegate.EXPECT().GetIamCredentials(gomock.Any(), gomock.Any()).DoAndReturn(
+					func(ctx context.Context, request *credentials.EksCredentialsRequest) (*credentials.EksCredentialsResponse, credentials.ResponseMetadata, error) {
+						time.Sleep(200 * time.Millisecond) // Simulate API call latency
+						response := sampleResponseOne
+						return &response, responseMetadataTest("one"), nil
+					}).Times(1)
+			},
+			expectedCredentialsResponse: []credentials.EksCredentialsResponse{
+				sampleResponseOne,
+			},
+		},
+		{
+			name: "calls with errors",
+			requests: []credentials.EksCredentialsRequest{
+				sampleRequestOne,
+			},
+			expectedDelegateCalls: func(delegate *mockcreds.MockCredentialRetriever) {
+				delegate.EXPECT().GetIamCredentials(gomock.Any(), gomock.Any()).DoAndReturn(
+					func(ctx context.Context, request *credentials.EksCredentialsRequest) (*credentials.EksCredentialsResponse, credentials.ResponseMetadata, error) {
+						time.Sleep(200 * time.Millisecond) // Simulate API call latency
+						return nil, nil, fmt.Errorf("my special error")
+					}).Times(1)
+			},
+			expectedErrMsg: "my special error",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			g := NewWithT(t)
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+			ctx := context.Background()
+
+			// setup
+			delegate := mockcreds.NewMockCredentialRetriever(ctrl)
+			if test.expectedDelegateCalls != nil {
+				test.expectedDelegateCalls(delegate)
+			}
+
+			opts := CachedCredentialRetrieverOpts{
+				Delegate:              delegate,
+				CredentialsRenewalTtl: 1 * time.Minute,
+				MaxCacheSize:          5,
+				CleanupInterval:       defaultCleanupInterval,
+				RefreshQPS:            1,
+			}
+
+			retriever := newCachedCredentialRetriever(opts)
+			for i := range test.requests {
+				req := test.requests[i]
+
+				// trigger
+
+				// Create a channel to receive iamCredentials from goroutines
+				credResponses := make(chan EksCredentialsResponseWithError)
+				for j := 0; j < numRequests; j++ {
+					go func() {
+						cred, _, err := retriever.GetIamCredentials(ctx, &req)
+						response := EksCredentialsResponseWithError{
+							credentialsResponse: cred,
+							err:                 err,
+						}
+						credResponses <- response
+					}()
+				}
+
+				responses := make([]EksCredentialsResponseWithError, numRequests)
+				// Wait for 3 results
+				for j := 0; j < numRequests; j++ {
+					response := <-credResponses // Receive result from any goroutine
+					responses[j] = response
+				}
+				t.Logf("All %d GetIamCredentials requests done\n", numRequests)
+				close(credResponses)
+
+				// validate
+				if test.expectedErrMsg != "" {
+					for j, response := range responses {
+						t.Logf("Validating %d with error\n", j)
+						g.Expect(response.err).To(HaveOccurred())
+						g.Expect(response.err.Error()).To(ContainSubstring(test.expectedErrMsg))
+						g.Expect(response.credentialsResponse).To(BeNil())
+					}
+					return
+				} else {
+					expectedResponse := test.expectedCredentialsResponse[i]
+					for j, response := range responses {
+						t.Logf("Validating %d without error\n", j)
+						g.Expect(response.err).ToNot(HaveOccurred())
+						g.Expect(*response.credentialsResponse).To(Equal(expectedResponse))
+					}
+				}
+			}
+		})
+	}
+}

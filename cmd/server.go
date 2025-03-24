@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.amzn.com/eks/eks-pod-identity-agent/configuration"
 	"go.amzn.com/eks/eks-pod-identity-agent/internal/middleware/logger"
+	"go.amzn.com/eks/eks-pod-identity-agent/internal/sharedcredsrotater"
 	"go.amzn.com/eks/eks-pod-identity-agent/pkg/handlers"
 	"go.amzn.com/eks/eks-pod-identity-agent/pkg/server"
 
@@ -26,6 +27,7 @@ import (
 var (
 	serverPort              uint16
 	probePort               uint16
+	metricsAddress          string
 	metricsPort             uint16
 	bindHosts               []string
 	clusterName             string
@@ -33,6 +35,7 @@ var (
 	maxCredentialRenewal    time.Duration
 	maxCacheSize            int
 	refreshQps              int
+	rotateCredentials       bool
 )
 
 var serverCmd = &cobra.Command{
@@ -54,6 +57,10 @@ var serverCmd = &cobra.Command{
 		}
 		if err != nil {
 			log.Fatal("Unable to initialize aws configuration, exiting")
+		}
+		if rotateCredentials {
+			log.Info("Credentials rotation enabled. Creds will be fetched and rotated from shared credentials file")
+			cfg.Credentials = aws.NewCredentialsCache(sharedcredsrotater.NewRotatingSharedCredentialsProvider())
 		}
 
 		startServers(ctx, cfg)
@@ -101,7 +108,7 @@ func createServers(cfg aws.Config) []*server.Server {
 
 	// add health probes listening on host's network
 	servers = append(servers, server.NewProbeServer(fmt.Sprintf("localhost:%d", probePort), bindHosts, serverPort))
-	servers = append(servers, server.NewMetricsServer(fmt.Sprintf("0.0.0.0:%d", metricsPort), bindHosts, serverPort))
+	servers = append(servers, server.NewMetricsServer(fmt.Sprintf("%s:%d", metricsAddress, metricsPort), bindHosts, serverPort))
 	return servers
 }
 
@@ -131,6 +138,7 @@ func init() {
 	// Setup the port where the proxy server will listen to connections
 	serverCmd.Flags().Uint16VarP(&serverPort, "port", "p", 80, "Listening port of the proxy server")
 	serverCmd.Flags().Uint16Var(&probePort, "probe-port", 2703, "Health and readiness listening port")
+	serverCmd.Flags().StringVar(&metricsAddress, "metrics-address", "0.0.0.0", "Metrics listening address")
 	serverCmd.Flags().Uint16Var(&metricsPort, "metrics-port", 2705, "Metrics listening port")
 	serverCmd.Flags().DurationVar(&maxCredentialRenewal, "max-credential-retention-before-renewal", 3*time.Hour,
 		"Maximum amount of time that agent waits before renewing credentials. Set 0 to disable caching.")
@@ -140,7 +148,7 @@ func init() {
 		"Maximum amount of queries per second to EKS Auth")
 	serverCmd.Flags().StringArrayVarP(&bindHosts, "bind-hosts", "b",
 		[]string{configuration.DefaultIpv4TargetHost, "[" + configuration.DefaultIpv6TargetHost + "]"}, "Hosts to bind server to")
-
+	serverCmd.Flags().BoolVar(&rotateCredentials, "rotate-credentials", false, "Enable credentials rotation from shared credentials file")
 	serverCmd.Flags().StringVar(&overrideEksAuthEndpoint, "endpoint", "", "Override for EKS auth endpoint")
 
 	// extended cmd flags
