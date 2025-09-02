@@ -12,6 +12,10 @@ The container credentials provider provides temporary credentials from an agent 
 
 Visit [EKS user guide](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-how-it-works.html)  to learn more about the Pod Identity feature.
 
+>[!NOTE]
+>This fork has extended capability to Chain-AssumeRole before passing it to the requester.
+>See [pkg/extensions/chainrole](./pkg/extensions/chainrole/) for details
+
 ## Building
 
 * `make build`  builds the Linux binaries.
