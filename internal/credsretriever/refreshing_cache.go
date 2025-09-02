@@ -63,7 +63,7 @@ var (
 	promCacheError = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pod_identity_cache_errors",
 		Help: "Removing credentials from cache, got non recoverable error",
-	}, []string{"type"},
+	}, []string{"type", "code"},
 	)
 
 	promCacheState = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -182,6 +182,7 @@ func (r *cachedCredentialRetriever) GetIamCredentials(ctx context.Context,
 	defer r.internalActiveRequestCache.Delete(request.ServiceAccountToken)
 
 	log.WithField("cache-hit", 0).Tracef("Could not find entry in cache, requesting creds from delegate")
+	promCacheState.WithLabelValues("miss").Inc()
 
 	iamCredentials, metadata, err := r.callDelegateAndCache(ctx, request)
 	if err != nil {
@@ -255,12 +256,14 @@ func (r *cachedCredentialRetriever) onCredentialRenewal(key string, entry cacheE
 			return
 		}
 
-		if eksauth.IsIrrecoverableApiError(err) {
+		errCode, isIrrecoverableError := eksauth.IsIrrecoverableApiError(err)
+		if isIrrecoverableError {
 			log.Infof("Removing credentials from cache, got non recoverable error: %s", err.Error())
-			promCacheError.WithLabelValues("NonRecoverable").Inc()
+			promCacheError.WithLabelValues("NonRecoverable", errCode).Inc()
 			r.internalCache.Delete(entry.originatingRequest.ServiceAccountToken)
 			return
 		}
+		promCacheError.WithLabelValues("Recoverable", errCode).Inc()
 		log.Infof("Could not renew, will try to keep existing creds. Error is recoverable: %s", err.Error())
 	} else {
 		log.Infof("Rate limited! Will try to keep creds locally")
@@ -276,7 +279,6 @@ func (r *cachedCredentialRetriever) onCredentialRenewal(key string, entry cacheE
 			Infof("Credentials still valid for at least %0.2fs, keeping them will try again after ttl expires", oldCredsDuration.Seconds())
 		r.internalCache.SetWithRefreshExpire(key, entry, newRefreshTtl, oldCredsDuration)
 	} else {
-		promCacheState.WithLabelValues("evicted").Inc()
 		log.Infof("Evicting credentials since they are too old")
 	}
 }
@@ -284,6 +286,7 @@ func (r *cachedCredentialRetriever) onCredentialRenewal(key string, entry cacheE
 func (r *cachedCredentialRetriever) onCredentialEviction(key string, entry cacheEntry) {
 	log := logger.FromContext(entry.requestLogCtx)
 	log.Infof("Credentials evicted")
+	promCacheState.WithLabelValues("evicted").Inc()
 }
 
 func minDuration(a time.Duration, b time.Duration) time.Duration {
