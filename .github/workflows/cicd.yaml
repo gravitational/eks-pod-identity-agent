@@ -79,12 +79,25 @@ jobs:
 
       - name: Setup docker buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3
-        
+
+      - name: Get runtime values from kvstore
+        id: kvstore
+        uses: gravitational/shared-workflows/tools/env-kvstore@tools/env-kvstore/v1.0.2
+        with:
+          cognito-identity-pool-id: "us-west-2:da53389e-a459-4a28-bd54-43eeb8e4b579"
+          cognito-role-arn: "arn:aws:iam::247230412011:role/github-actions-cognito-oidc"
+          values: |
+            ECR_ROLE,variable
+            PUBLIC_ECR_REPO,variable
+            PRIVATE_ECR_REPO,variable
+            HELM_PRIVATE_ECR_REPO,variable
+            HELM_PUBLIC_ECR_REPO,variable
+
       - name: Configure AWS credentials for ECR Private
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4
         with:
           aws-region: ${{ matrix.ecr_repo.region }}
-          role-to-assume: ${{ vars.ECR_ROLE }}
+          role-to-assume: ${{ env.ECR_ROLE }}
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -97,8 +110,8 @@ jobs:
         uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
         with:
           images: |
-            name=${{ vars.PUBLIC_ECR_REPO }},enable=${{ matrix.ecr_repo.type == 'public' }}
-            name=${{ vars.PRIVATE_ECR_REPO }},enable=${{ matrix.ecr_repo.type == 'private' }}
+            name=${{ env.PUBLIC_ECR_REPO }},enable=${{ matrix.ecr_repo.type == 'public' }}
+            name=${{ env.PRIVATE_ECR_REPO }},enable=${{ matrix.ecr_repo.type == 'private' }}
           flavor: |
             latest=false
           # Enable PR
@@ -108,7 +121,7 @@ jobs:
             type=ref,suffix=-{{ sha }},event=pr
             type=sha,prefix={{branch}}-,suffix=-{{date 'YYYYMMDDTHHmmss'}},format=short,enable=${{ startsWith(github.ref, 'refs/heads/') }}
             type=semver,pattern={{version}},event=tag
-  
+
       - name: Build the Docker image and push
         uses: docker/build-push-action@5cd11c3a4ced054e52742c5fd54dca954e0edd85 # v6
         with:
@@ -154,9 +167,9 @@ jobs:
           ARTIFACT_NAME=$(find . -name '*.tgz' -exec basename {} \; | head -n 1)
 
           # Publish the chart
-          helm_repo=${{vars.HELM_PRIVATE_ECR_REPO}}
+          helm_repo=${{env.HELM_PRIVATE_ECR_REPO}}
           if [ "${{ matrix.ecr_repo.type}}" = "public" ]; then
-            helm_repo=${{vars.HELM_PUBLIC_ECR_REPO}}
+            helm_repo=${{env.HELM_PUBLIC_ECR_REPO}}
           fi
 
           helm push "$ARTIFACT_NAME" "oci://$helm_repo"
